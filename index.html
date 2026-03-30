@@ -1,8 +1,172 @@
 <!DOCTYPE html>
+<html>
 <head>
-
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f0f0f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    canvas { display: block; }
+  </style>
 </head>
 <body>
+  <canvas id="c"></canvas>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
 
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Cube half-size
+    const S = 130;
+
+    // 8 vertices of a cube
+    const verts = [
+      [-S,-S,-S], [ S,-S,-S], [ S, S,-S], [-S, S,-S], // back face
+      [-S,-S, S], [ S,-S, S], [ S, S, S], [-S, S, S], // front face
+    ];
+
+    // 12 edges
+    const edges = [
+      [0,1],[1,2],[2,3],[3,0], // back
+      [4,5],[5,6],[6,7],[7,4], // front
+      [0,4],[1,5],[2,6],[3,7], // connecting
+    ];
+
+    // Face index sets (for coloring)
+    const faces = [
+      [4,5,6,7], // front  — purple
+      [0,1,2,3], // back   — purple
+      [0,3,7,4], // left   — teal
+      [1,2,6,5], // right  — teal
+      [3,2,6,7], // top    — pink
+      [0,1,5,4], // bottom — pink
+    ];
+    const faceColors = [
+      'rgba(120,115,245,',
+      'rgba(120,115,245,',
+      'rgba(74,222,222,',
+      'rgba(74,222,222,',
+      'rgba(255,110,199,',
+      'rgba(255,110,199,',
+    ];
+
+    let angleY = 0;
+    const tiltX = 20 * Math.PI / 180;
+    const fov = 900;
+
+    function rotY(v, a) {
+      const [x, y, z] = v;
+      return [
+        x * Math.cos(a) + z * Math.sin(a),
+        y,
+        -x * Math.sin(a) + z * Math.cos(a),
+      ];
+    }
+    function rotX(v, a) {
+      const [x, y, z] = v;
+      return [
+        x,
+        y * Math.cos(a) - z * Math.sin(a),
+        y * Math.sin(a) + z * Math.cos(a),
+      ];
+    }
+
+    function project(v, cx, cy) {
+      const z = v[2] + fov;
+      const scale = fov / z;
+      return [cx + v[0] * scale, cy + v[1] * scale, z, scale];
+    }
+
+    // Compute face normal Z to determine draw order / visibility
+    function faceNormalZ(pts) {
+      const ax = pts[1][0] - pts[0][0], ay = pts[1][1] - pts[0][1];
+      const bx = pts[2][0] - pts[0][0], by = pts[2][1] - pts[0][1];
+      return ax * by - ay * bx;
+    }
+
+    function draw(ts) {
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2;
+
+      ctx.clearRect(0, 0, W, H);
+
+      angleY = ts * 0.0008;
+
+      // Transform all vertices
+      const transformed = verts.map(v => rotX(rotY(v, angleY), tiltX));
+      const projected   = transformed.map(v => project(v, cx, cy));
+
+      // Sort faces back-to-front by average Z
+      const sortedFaces = faces.map((fi, i) => {
+        const avgZ = fi.reduce((s, vi) => s + transformed[vi][2], 0) / fi.length;
+        return { fi, i, avgZ };
+      }).sort((a, b) => b.avgZ - a.avgZ);
+
+      // Draw faces
+      for (const { fi, i } of sortedFaces) {
+        const pts2d = fi.map(vi => projected[vi]);
+        const nz = faceNormalZ(pts2d);
+        const alpha = nz < 0 ? 0.18 : 0.06; // brighter on visible side
+
+        ctx.beginPath();
+        ctx.moveTo(pts2d[0][0], pts2d[0][1]);
+        for (let k = 1; k < pts2d.length; k++) ctx.lineTo(pts2d[k][0], pts2d[k][1]);
+        ctx.closePath();
+        ctx.fillStyle = faceColors[i] + alpha + ')';
+        ctx.fill();
+      }
+
+      // Draw edges
+      for (const [a, b] of edges) {
+        const p1 = projected[a], p2 = projected[b];
+        const avgZ = (transformed[a][2] + transformed[b][2]) / 2;
+        const alpha = 0.4 + 0.6 * (1 - Math.max(0, Math.min(1, (avgZ + S) / (2 * S))));
+
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+
+        // Pick edge color by which faces share it
+        const inTeal   = edges.indexOf([a,b]) >= 8; // rough grouping
+        ctx.strokeStyle = `rgba(120,115,245,${alpha.toFixed(2)})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      // Draw "3D" text always facing camera (no rotation applied to text)
+      const gradient = ctx.createLinearGradient(cx, cy - 80, cx, cy + 80);
+      gradient.addColorStop(0, '#ffffff');
+      gradient.addColorStop(0.5, '#a0c4ff');
+      gradient.addColorStop(1, '#7873f5');
+
+      ctx.font = 'bold 110px Arial Black, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Shadow layers for 3D depth
+      ctx.fillStyle = 'rgba(120,115,245,0.3)';
+      for (let d = 8; d >= 1; d--) {
+        ctx.fillText('3D', cx + d, cy + d);
+      }
+
+      ctx.fillStyle = gradient;
+      ctx.fillText('3D', cx, cy);
+
+      requestAnimationFrame(draw);
+    }
+
+    requestAnimationFrame(draw);
+  </script>
 </body>
 </html>
